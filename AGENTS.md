@@ -3,7 +3,7 @@
 ## Project Shape
 
 - Bun is the package manager/runtime; use `bun install --frozen-lockfile` with the committed `bun.lock`.
-- The plugin entry is `src/index.ts` (plugin wiring + tool schema); helpers live in role-based modules — `src/types.ts` (shared types), `src/auth.ts` (auth resolution), `src/input-image.ts` (reference image reading), `src/output-image.ts` (non-overwriting save + message), `src/codex.ts` (Codex backend call + SSE parsing).
+- The plugin entry is `src/index.ts` (plugin wiring, credential resolution, and tool schema); helpers live in role-based modules — `src/types.ts` (shared types), `src/input-image.ts` (reference image reading), `src/output-image.ts` (non-overwriting save + message), `src/codex.ts` (Codex backend call + SSE parsing).
 - `bun run build` bundles `src` into a single self-contained `dist/index.js` via `bun build --target node --format esm --packages external` (dependencies, including the `@opencode-ai/plugin` peer dep, stay external). Bundling avoids the extensionless relative imports `tsc` would emit, which native Node ESM cannot resolve. No `.d.ts` is published — the plugin is loaded by OpenCode at runtime, not imported as a typed library.
 - `dist/` is ignored locally but is the publish artifact (just `index.js`). Run `bun run build` before inspecting package output.
 - `bunfig.toml` enforces `install.minimumReleaseAge = 604800` (1 week): newly published versions are filtered out by `bun install` / `bun add` / `bun outdated`.
@@ -15,14 +15,14 @@
 - `bunx biome ci .` is the CI formatter/linter check.
 - `bun run check` runs `biome check --write .`; it may modify files.
 - `bun run test` runs `bun test tests/unit` — unit tests only, and is what CI uses. (A bare `bun test` would also discover the e2e files under `tests/e2e/` and try to run them for real, so prefer the script.)
-- `bun run test:e2e_subscription` sets `OPENCODE_MODEL=openai/gpt-5.5` and runs `tests/e2e/subscription.test.ts` (ChatGPT subscription / OAuth path). It can take minutes because it calls `opencode run` and generates real images. The future API-key path gets its own `test:e2e_apikey` script + `tests/e2e/apikey.test.ts`.
-- Each e2e path is its own script (its own `bun test` process), which also avoids the unit-test `process.env` leak into the single-process e2e `opencode` spawn.
+- `bun run test:e2e_subscription` sets `OPENCODE_MODEL=openai/gpt-5.5` and runs `tests/e2e/subscription.test.ts` (ChatGPT subscription / OAuth path). It can take minutes because it calls `opencode2 run` and generates real images. The future API-key path gets its own `test:e2e_apikey` script + `tests/e2e/apikey.test.ts`.
+- Each e2e path is its own script (its own `bun test` process), which also avoids unit-test environment changes leaking into the single-process e2e `opencode2` spawn.
 - CI runs `bun run typecheck`, `bunx biome ci .`, and `bun run test`. The e2e suites are not run in CI's default checks (they need real auth + generations); they are invoked separately via their `test:e2e_*` scripts.
 
 ## E2E Requirements
 
-- `tests/e2e.test.ts` shells out to the `opencode` CLI with `--dangerously-skip-permissions` in a temporary workdir.
-- E2E requires OpenCode to be authenticated with ChatGPT OAuth; the plugin reads `OPENCODE_AUTH_CONTENT` first, then `$XDG_DATA_HOME/opencode/auth.json`.
+- `tests/e2e/subscription.test.ts` shells out to `opencode2 run --standalone --auto` in a temporary workdir.
+- E2E requires OpenCode v2 to be authenticated with ChatGPT OAuth; the plugin resolves the active OpenAI credential through the plugin context.
 - The e2e tests assert that produced files are valid PNGs and cover the plugin's output auto-versioning behavior.
 
 ## Implementation Notes

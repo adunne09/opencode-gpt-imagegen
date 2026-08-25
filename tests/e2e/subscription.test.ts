@@ -32,16 +32,17 @@ async function writeOpencodeConfig(): Promise<void> {
   await mkdir(cfgDir, { recursive: true })
   const config = {
     $schema: "https://opencode.ai/config.json",
-    plugin: [pathToFileURL(REPO_DIR).href],
+    plugins: [pathToFileURL(REPO_DIR).href],
   }
   await writeFile(path.join(cfgDir, "opencode.jsonc"), JSON.stringify(config, null, 2))
 }
 
 async function runOpencode(prompt: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = ["run", prompt, "--dir", WORKDIR, "--dangerously-skip-permissions"]
+    const args = ["run", "--standalone", "--auto", prompt]
     if (process.env.OPENCODE_MODEL) args.push("--model", process.env.OPENCODE_MODEL)
-    const proc = spawn("opencode", args, {
+    const proc = spawn("opencode2", args, {
+      cwd: WORKDIR,
       stdio: "inherit",
       env: { ...process.env, XDG_CONFIG_HOME },
     })

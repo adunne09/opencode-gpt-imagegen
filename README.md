@@ -4,7 +4,7 @@
 
 > Bring [**ChatGPT Images 2.0**](https://openai.com/index/introducing-chatgpt-images-2-0/) (`gpt-image-2`) to [OpenCode](https://opencode.ai). Use it through your **ChatGPT subscription** (no API costs!) or through the **OpenAI API** — your call.
 
-[![OpenCode plugin](https://img.shields.io/badge/OpenCode-plugin-blue.svg)](https://opencode.ai/docs/plugins/)
+[![OpenCode plugin](https://img.shields.io/badge/OpenCode-plugin-blue.svg)](https://opencode.ai/v2/docs/build/plugins/)
 [![npm version](https://img.shields.io/npm/v/opencode-gpt-imagegen.svg)](https://www.npmjs.com/package/opencode-gpt-imagegen)
 [![CI](https://github.com/yuji-hatakeyama/opencode-gpt-imagegen/actions/workflows/ci.yml/badge.svg)](https://github.com/yuji-hatakeyama/opencode-gpt-imagegen/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
@@ -21,16 +21,16 @@
 
 ## Installation
 
-Add this plugin to your [OpenCode config](https://opencode.ai/docs/plugins/). For example, in `opencode.json`:
+Add this plugin to your [OpenCode config](https://opencode.ai/v2/docs/build/plugins/). For example, in `opencode.json`:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-gpt-imagegen"]
+  "plugins": ["opencode-gpt-imagegen"]
 }
 ```
 
-OpenCode auto-installs the package via Bun on next launch — no separate `npm install` step is needed. The plugin requires OpenCode to be authenticated with ChatGPT.
+OpenCode auto-installs the package via Bun on next launch — no separate `npm install` step is needed. This branch targets OpenCode v2 beta `0.0.0-beta-18219` and requires OpenCode to be authenticated with ChatGPT.
 
 ## Usage
 
