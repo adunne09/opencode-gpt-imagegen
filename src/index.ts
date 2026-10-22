@@ -1,6 +1,6 @@
 import { basename } from "node:path"
 import { pathToFileURL } from "node:url"
-import { Plugin } from "@opencode-ai/plugin"
+import { Plugin } from "@opencode/plugin"
 import { callViaCodexResponses } from "./codex"
 import { readReferenceImages } from "./input-image"
 import { saveGeneratedImage } from "./output-image"
