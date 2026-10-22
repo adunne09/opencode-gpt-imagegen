@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
-import { callViaCodexResponses, parseImageGenerationResultFromSSE } from "../../src/codex"
+import {
+  callViaCodexResponses,
+  DEFAULT_MODEL,
+  parseCodexConfigModel,
+  parseImageGenerationResultFromSSE,
+  resolveModel,
+} from "../../src/codex"
 import type { GenerateArgs } from "../../src/types"
 
 // Build a ReadableStream that emits the given raw SSE text, as the fetch body would.
@@ -83,7 +89,7 @@ describe("callViaCodexResponses", () => {
 
     const auth = { type: "oauth", access: "tok", accountId: "acct" } as const
     const args: GenerateArgs = { prompt: "a cat", out: "cat.png", quality: "high", size: "1024x1024" }
-    const result = await callViaCodexResponses(auth, args, ["data:image/png;base64,AAA"])
+    const result = await callViaCodexResponses(auth, args, ["data:image/png;base64,AAA"], "test-model")
 
     expect(result).toBe("PARSED")
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -99,7 +105,7 @@ describe("callViaCodexResponses", () => {
     expect(headers["Content-Type"]).toBe("application/json")
 
     const body = JSON.parse(init.body as string)
-    expect(body.model).toBe("gpt-5.5")
+    expect(body.model).toBe("test-model")
     expect(body.stream).toBe(true)
     expect(body.store).toBe(false)
     // The instruction is load-bearing: it forces the backend to emit an image, not text.
@@ -123,7 +129,7 @@ describe("callViaCodexResponses", () => {
 
     const auth = { type: "oauth", access: "tok" } as const
     const args: GenerateArgs = { prompt: "a cat", out: "cat.png", quality: "auto" }
-    await callViaCodexResponses(auth, args, [])
+    await callViaCodexResponses(auth, args, [], "test-model")
 
     const [, init] = fetchMock.mock.calls[0]
     expect(init.headers as Record<string, string>).not.toHaveProperty("ChatGPT-Account-Id")
@@ -138,6 +144,61 @@ describe("callViaCodexResponses", () => {
 
     const auth = { type: "oauth", access: "tok" } as const
     const args: GenerateArgs = { prompt: "a cat", out: "cat.png", quality: "auto" }
-    expect(callViaCodexResponses(auth, args, [])).rejects.toThrow("codex responses request failed: 500 upstream boom")
+    expect(callViaCodexResponses(auth, args, [], "test-model")).rejects.toThrow(
+      "codex responses request failed: 500 upstream boom",
+    )
+  })
+
+  test("retries once with the default model when the configured model is unsupported", async () => {
+    const fetchMock = mock(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string)
+      if (body.model === "gpt-5.5") {
+        return new Response(
+          '{"detail":"The \'gpt-5.5\' model is not supported when using Codex with a ChatGPT account."}',
+          {
+            status: 400,
+          },
+        )
+      }
+      return new Response(imageDoneEvent("FALLBACK"))
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const auth = { type: "oauth", access: "tok" } as const
+    const args: GenerateArgs = { prompt: "a cat", out: "cat.png", quality: "low" }
+    expect(await callViaCodexResponses(auth, args, [], "gpt-5.5")).toBe("FALLBACK")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string).model).toBe(DEFAULT_MODEL)
+  })
+
+  test("does not retry on unrelated 400 errors", async () => {
+    const fetchMock = mock(async () => new Response("bad size", { status: 400 }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const auth = { type: "oauth", access: "tok" } as const
+    const args: GenerateArgs = { prompt: "a cat", out: "cat.png", quality: "low" }
+    expect(callViaCodexResponses(auth, args, [], "gpt-5.5")).rejects.toThrow("400 bad size")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("resolveModel", () => {
+  test("prefers GPT_IMAGEGEN_MODEL", async () => {
+    expect(await resolveModel({ GPT_IMAGEGEN_MODEL: "env-model" }, "/nonexistent/config.toml")).toBe("env-model")
+  })
+
+  test("reads the top-level model from the codex config", async () => {
+    const path = `${process.env.TMPDIR ?? "/tmp"}/imagegen-codex-config-${Date.now()}.toml`
+    await Bun.write(path, 'model = "cfg-model"\n[profiles.x]\nmodel = "other"\n')
+    expect(await resolveModel({}, path)).toBe("cfg-model")
+  })
+
+  test("falls back to the default when no config exists", async () => {
+    expect(await resolveModel({}, "/nonexistent/config.toml")).toBe(DEFAULT_MODEL)
+  })
+
+  test("ignores model keys inside tables", () => {
+    expect(parseCodexConfigModel('[profiles.x]\nmodel = "nested"\n')).toBeUndefined()
+    expect(parseCodexConfigModel("model = 'single'")).toBe("single")
   })
 })

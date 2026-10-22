@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 import type { GenerateArgs, OpenAIAuth } from "./types"
 
@@ -6,9 +9,35 @@ import type { GenerateArgs, OpenAIAuth } from "./types"
 // https://github.com/openai/codex/blob/fca81eeb5bab4cad997622a359d446e6489c445b/codex-rs/core/src/client.rs#L146
 const CODEX_RESPONSES_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 
-// Codex model slug used for the hosted image_generation turn.
-// https://github.com/openai/codex/blob/fca81eeb5bab4cad997622a359d446e6489c445b/codex-rs/models-manager/models.json#L24
-const SUBSCRIPTION_MODEL = "gpt-5.5"
+// Codex model slug used for the hosted image_generation turn when neither
+// GPT_IMAGEGEN_MODEL nor ~/.codex/config.toml names one. ChatGPT accounts reject
+// retired slugs (e.g. "gpt-5.5"), so prefer the model Codex itself is configured with.
+export const DEFAULT_MODEL = "gpt-6-astra"
+
+export function parseCodexConfigModel(toml: string): string | undefined {
+  for (const line of toml.split("\n")) {
+    const trimmed = line.trim()
+    // Only top-level keys: stop at the first table header.
+    if (trimmed.startsWith("[")) break
+    const match = trimmed.match(/^model\s*=\s*["']([^"']+)["']/)
+    if (match) return match[1]
+  }
+  return undefined
+}
+
+export async function resolveModel(
+  env: Record<string, string | undefined> = process.env,
+  configPath = join(env.CODEX_HOME ?? join(homedir(), ".codex"), "config.toml"),
+): Promise<string> {
+  const override = env.GPT_IMAGEGEN_MODEL?.trim()
+  if (override) return override
+  const toml = await readFile(configPath, "utf8").catch(() => "")
+  return parseCodexConfigModel(toml) ?? DEFAULT_MODEL
+}
+
+function isUnsupportedModelError(status: number, detail: string): boolean {
+  return status === 400 && /model/i.test(detail) && /not supported|unsupported|does not exist|unknown/i.test(detail)
+}
 
 type CodexSSEEvent = {
   type?: string
@@ -43,6 +72,33 @@ export async function callViaCodexResponses(
   auth: OpenAIAuth,
   args: GenerateArgs,
   inputImageDataUrls: string[],
+  model?: string,
+): Promise<string> {
+  const primary = model ?? (await resolveModel())
+  try {
+    return await requestImage(auth, args, inputImageDataUrls, primary)
+  } catch (error) {
+    if (primary !== DEFAULT_MODEL && error instanceof CodexRequestError && error.unsupportedModel) {
+      return requestImage(auth, args, inputImageDataUrls, DEFAULT_MODEL)
+    }
+    throw error
+  }
+}
+
+class CodexRequestError extends Error {
+  constructor(
+    message: string,
+    readonly unsupportedModel: boolean,
+  ) {
+    super(message)
+  }
+}
+
+async function requestImage(
+  auth: OpenAIAuth,
+  args: GenerateArgs,
+  inputImageDataUrls: string[],
+  model: string,
 ): Promise<string> {
   const userContent: Array<Record<string, unknown>> = [{ type: "input_text", text: args.prompt }]
   for (const dataUrl of inputImageDataUrls) {
@@ -51,7 +107,7 @@ export async function callViaCodexResponses(
 
   // https://github.com/openai/codex/blob/fca81eeb5bab4cad997622a359d446e6489c445b/codex-rs/core/src/client.rs#L745-L763
   const body: Record<string, unknown> = {
-    model: SUBSCRIPTION_MODEL,
+    model,
     instructions:
       "You are an image generation assistant running inside the Codex backend. " +
       "Always satisfy the request by invoking the image_generation tool exactly once. " +
@@ -83,7 +139,10 @@ export async function callViaCodexResponses(
   })
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "")
-    throw new Error(`codex responses request failed: ${res.status} ${detail.slice(0, 500)}`)
+    throw new CodexRequestError(
+      `codex responses request failed: ${res.status} ${detail.slice(0, 500)}`,
+      isUnsupportedModelError(res.status, detail),
+    )
   }
   return parseImageGenerationResultFromSSE(res.body)
 }
